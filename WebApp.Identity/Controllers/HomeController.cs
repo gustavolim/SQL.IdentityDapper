@@ -69,7 +69,7 @@ namespace WebApp.Identity.Controllers
         }
 
         [HttpGet]
-        public async Task<IActionResult> Login()
+        public IActionResult Login()
         {
             return View();
         }
@@ -91,7 +91,7 @@ namespace WebApp.Identity.Controllers
 
                     var result = await _userManager.CreateAsync(user, model.Password);
                 }
-                return View("Sucess");
+                return View("Success");
             }
 
             return View();
