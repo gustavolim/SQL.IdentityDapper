@@ -4,10 +4,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using System;
-using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
-using System.Security.Claims;
 using System.Threading.Tasks;
 using WebApp.Identity.Models;
 
@@ -17,11 +14,16 @@ namespace WebApp.Identity.Controllers
     {
         private readonly ILogger<HomeController> _logger;
         private readonly UserManager<MyUser> _userManager;
+        private readonly IUserClaimsPrincipalFactory<MyUser> _userClaimsPrincipalFactory;
+        private readonly SignInManager<MyUser> _signInManager;
 
-
-        public HomeController(ILogger<HomeController> logger, UserManager<MyUser> userManager)
+        public HomeController(ILogger<HomeController> logger, UserManager<MyUser> userManager,
+            IUserClaimsPrincipalFactory<MyUser> userClaimsPrincipalFactory,
+            SignInManager<MyUser> signInManager)
         {
             _userManager = userManager;
+            _userClaimsPrincipalFactory = userClaimsPrincipalFactory;
+            _signInManager = signInManager;
             _logger = logger;
         }
 
@@ -53,16 +55,44 @@ namespace WebApp.Identity.Controllers
             {
                 var user = await _userManager.FindByNameAsync(model.UserName);
 
-                if (user != null && await _userManager.CheckPasswordAsync(user, model.Password))
+                if (user != null && !await _userManager.IsLockedOutAsync(user))
                 {
-                    var identity = new ClaimsIdentity("cookies");
-                    identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, user.Id));
-                    identity.AddClaim(new Claim(ClaimTypes.Name, user.UserName));
+                    if (await _userManager.CheckPasswordAsync(user, model.Password))
+                    {
 
-                    await HttpContext.SignInAsync("cookies", new ClaimsPrincipal(identity));
 
-                    return RedirectToAction("About");
+                        if (!await _userManager.IsEmailConfirmedAsync(user))
+                        {
+                            ModelState.AddModelError("", "Email não válido");
+
+                            return View();
+                        }
+
+                        await _userManager.ResetAccessFailedCountAsync(user);
+
+                        var principal = await _userClaimsPrincipalFactory.CreateAsync(user);
+
+                        await HttpContext.SignInAsync("Identity.Application", principal);
+
+                        return RedirectToAction("About");
+                    }
+
+                    await _userManager.AccessFailedAsync(user);
+
+                    if(await _userManager.IsLockedOutAsync(user))
+                    {
+                        // Email enviado para mudar a senha
+                    }
                 }
+
+                // --- Modo rapido de acesso usand _signInManager
+                //var signInresult = await _signInManager.PasswordSignInAsync(
+                //   model.UserName, model.Password, false, false);
+
+                //if (signInresult.Succeeded)
+                //{
+                //    return RedirectToAction("About");
+                //}
                 ModelState.AddModelError("", "Usuário ou Senha Inválida");
             }
             return View();
@@ -87,18 +117,128 @@ namespace WebApp.Identity.Controllers
                     {
                         Id = Guid.NewGuid().ToString(),
                         UserName = model.UserName,
+                        Email = model.UserName
                     };
 
                     var result = await _userManager.CreateAsync(user, model.Password);
+
+                    if (result.Succeeded)
+                    {
+                        var token = await _userManager.GenerateEmailConfirmationTokenAsync(user);
+                        var confEmail = Url.Action("ConfirmEmailAddress", "Home", new
+                        { token = token, email = user.Email }, Request.Scheme);
+
+                        System.IO.File.WriteAllText("confirmaEmail.txt", confEmail);
+                    }
+                    else
+                    {
+                        foreach (var item in result.Errors)
+                        {
+                            ModelState.AddModelError("", item.Description);
+                        }
+                        return View();
+                    }
                 }
-                return View("Success");
+                ModelState.AddModelError("", "Usuário Já existe");
+                return View("");
             }
 
             return View();
         }
+
+
+
+        [HttpGet]
+        public async Task<IActionResult> ConfirmEmailAddress(string token, string email)
+        {
+
+            var user = await _userManager.FindByEmailAsync(email);
+
+            if (user != null)
+            {
+                var result = await _userManager.ConfirmEmailAsync(user, token);
+
+                if (result.Succeeded)
+                {
+                    return View("Success");
+                }
+            }
+            return View("Error");
+        }
+
         [HttpGet]
         public IActionResult Register()
         {
+            return View();
+        }
+
+        [HttpGet]
+        public IActionResult ForgotPassword()
+        {
+            return View();
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> ForgotPassword(ForgotPasswordModel model)
+        {
+            if (ModelState.IsValid)
+            {
+                var user = await _userManager.FindByEmailAsync(model.Email);
+
+                if (user != null)
+                {
+                    var token = await _userManager.GeneratePasswordResetTokenAsync(user);
+                    var resetURL = Url.Action("ResetPassword", "Home", new
+                    { token = token, email = model.Email }, Request.Scheme);
+
+                    /// exemplo de email 
+                    /// 
+                    System.IO.File.WriteAllText("resetLink.txt", resetURL);
+
+                    return View("Success");
+                }
+                else
+                {
+                    //usuario não encontrado;
+                }
+            }
+            return View();
+        }
+
+
+        [HttpGet]
+        public IActionResult ResetPassword(string token, string email)
+        {
+            return View(new ResetPasswordModel { Token = token, Email = email });
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> ResetPassword(ResetPasswordModel model)
+        {
+            if (ModelState.IsValid)
+            {
+                var user = await _userManager.FindByEmailAsync(model.Email);
+
+                if (user != null)
+                {
+                    var result = await _userManager.ResetPasswordAsync(user, model.Token, model.Password);
+
+                    if (!result.Succeeded)
+                    {
+                        foreach (var item in result.Errors)
+                        {
+                            ModelState.AddModelError("", item.Description);
+                        }
+
+                        return View();
+                    }
+
+                    return View("Success");
+                }
+
+                ModelState.AddModelError("", "Invalid Request");
+            }
+
             return View();
         }
 

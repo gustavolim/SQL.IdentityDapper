@@ -23,7 +23,7 @@
                 <span asp-validation-for="Password" class="text-danger"></span>
             </div>
             <div class="form-group">
-                <input type="submit" value="Create" class="btn btn-primary" />
+                <input type="submit" value="Logar" class="btn btn-primary" />
             </div>
         </form>
     </div>
@@ -31,6 +31,7 @@
 
 <div>
     <a asp-action="Index">Back to List</a>
+    <a asp-controller="Home" asp-action="ForgotPassword">Esqueci a senha</a>
 </div>
 
 @section Scripts {
